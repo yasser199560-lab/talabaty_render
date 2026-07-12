@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { Role } from "../models/User";
+
 
 export const generateToken = (id: string, role: Role): string => {
   const secret = process.env.JWT_SECRET as string;
