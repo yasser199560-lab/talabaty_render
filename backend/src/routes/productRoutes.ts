@@ -1,59 +1,20 @@
-import express from "express";
-
+import { Router } from "express";
+import { protect } from "../middleware/authMiddleware";
+import { authorize } from "../middleware/roleMiddleware";
 import {
+  listProducts,
+  listMyProducts,
   createProduct,
-  getProducts,
-  getProductById,
   updateProduct,
   deleteProduct,
 } from "../controllers/productController";
 
-import { validateProduct } from "../middleware/validateProduct";
+const router = Router();
 
-
-const router = express.Router();
-
-
-// ===============================
-// PRODUCT ROUTES
-// ===============================
-
-
-// Create Product
-router.post(
-  "/",
-  validateProduct,
-  createProduct
-);
-
-
-// Get All Products
-router.get(
-  "/",
-  getProducts
-);
-
-
-// Get Single Product
-router.get(
-  "/:id",
-  getProductById
-);
-
-
-// Update Product
-router.put(
-  "/:id",
-  updateProduct
-);
-
-
-// Delete Product
-router.delete(
-  "/:id",
-  deleteProduct
-);
-
-
+router.get("/", listProducts);
+router.get("/mine", protect, authorize("partner"), listMyProducts);
+router.post("/", protect, authorize("partner"), createProduct);
+router.patch("/:id", protect, authorize("partner"), updateProduct);
+router.delete("/:id", protect, authorize("partner"), deleteProduct);
 
 export default router;

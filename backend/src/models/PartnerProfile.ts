@@ -1,33 +1,42 @@
-import { Schema, model, Document, Types } from "mongoose";
+import mongoose, { Schema, Document, Types } from "mongoose";
+
+export type StoreCategory = "Restaurant" | "Supermarket" | "Pharmacy" | "Fashion" | "Bakery";
 
 export interface IPartnerProfile extends Document {
-  userId: Types.ObjectId; // FK -> users._id (the login account for this store)
+  userId: Types.ObjectId;
   storeName: string;
   description?: string;
-  address?: string;
-  phoneNumber?: string;
+  address: string;
+  phoneNumber: string;
+  // Added to support the customer dashboard/store browsing UI
+  // (category filters, popular-stores cards, rating, delivery estimate).
+  // Not in the original BRD table, kept here since it's store-level data,
+  // same reasoning as why partner_profiles exists separately from users.
+  category?: StoreCategory;
+  rating?: number;
+  deliveryTime?: string;
+  coverImageUrl?: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
-const PartnerProfileSchema = new Schema<IPartnerProfile>(
+const partnerProfileSchema = new Schema<IPartnerProfile>(
   {
-    userId: {
-      type: Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-      unique: true, // one profile per login account
-      index: true,
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, unique: true },
+    storeName: { type: String, required: true },
+    description: { type: String },
+    address: { type: String, required: true },
+    phoneNumber: { type: String, required: true },
+    category: {
+      type: String,
+      enum: ["Restaurant", "Supermarket", "Pharmacy", "Fashion", "Bakery"],
+      default: "Restaurant",
     },
-    storeName: { type: String, required: true, trim: true },
-    description: { type: String, trim: true },
-    address: { type: String, trim: true },
-    phoneNumber: { type: String, trim: true },
+    rating: { type: Number, min: 0, max: 5, default: 4.5 },
+    deliveryTime: { type: String, default: "25-35 min" },
+    coverImageUrl: { type: String },
   },
-  {
-    timestamps: true,
-    collection: "partnerprofiles", // matches the collection name shown in Compass
-  }
+  { timestamps: true }
 );
 
-export default model<IPartnerProfile>("PartnerProfile", PartnerProfileSchema);
+export default mongoose.model<IPartnerProfile>("PartnerProfile", partnerProfileSchema);

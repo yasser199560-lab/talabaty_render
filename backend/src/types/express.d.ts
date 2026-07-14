@@ -1,13 +1,15 @@
-import "express-serve-static-core";
+import { Role } from "../models/User";
 
-declare module "express-serve-static-core" {
-  interface User {
-    id: string;
-    role: string;
-  }
-
-  interface Request {
-    user?: User;
+// Augments Express's Request type so req.user is available and typed
+// after authMiddleware runs.
+declare global {
+  namespace Express {
+    interface Request {
+      user?: {
+        id: string;
+        role: Role;
+      };
+    }
   }
 }
 
