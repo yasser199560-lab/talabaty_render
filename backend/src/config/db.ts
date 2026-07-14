@@ -49,9 +49,3 @@ const connectDB = async (): Promise<void> => {
 
 
 export default connectDB;
-
-
-//const uri = mongodb://${process.env.MONGO_HOST}:${process.env.MONGO_PORT}/${process.env.MONGO_DB};
-
-//await mongoose.connect(uri);
-
