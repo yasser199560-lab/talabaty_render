@@ -15,6 +15,11 @@ export interface IUser extends Document {
   // new collection, same reasoning as admin: no other role-specific data.
   phone?: string;
   town?: string;
+  // Data URL (base64) or hosted image URL for the account's profile
+  // picture. Stored directly on User rather than a new collection since
+  // it's a single small field shared by every role, same reasoning as
+  // phone/town above.
+  avatarUrl?: string;
   // Customer's preferred checkout payment method + a Whish account
   // reference, shown on the Payment Methods page and used to pre-select
   // the option at checkout.
@@ -46,6 +51,7 @@ const userSchema = new Schema<IUser>(
     },
     phone: { type: String },
     town: { type: String },
+    avatarUrl: { type: String },
     preferredPaymentMethod: { type: String, enum: ["COD", "Whish Money"] },
     whishNumber: { type: String },
     resetPasswordToken: { type: String, select: false },

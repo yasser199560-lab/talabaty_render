@@ -34,7 +34,11 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+// Default express.json() limit is 100kb, which a base64-encoded profile
+// picture blows past immediately (a ~2MB image becomes ~2.7MB as base64).
+// Raised here since the admin profile picture upload is sent as a data URL
+// in the request body rather than a multipart file upload.
+app.use(express.json({ limit: "5mb" }));
 
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 

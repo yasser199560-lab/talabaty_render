@@ -5,6 +5,7 @@ import Order from "../models/Order";
 import Product from "../models/Product";
 import PartnerProfile from "../models/PartnerProfile";
 import Address from "../models/Address";
+import { parseStatusFilter, parseDateFilter } from "../utils/orderQueryFilters";
 
 // POST /api/orders — checkout: snapshot cart items into an order.
 // A cart can hold items from several different stores at once (the
@@ -94,15 +95,29 @@ export const getOrderById = async (req: AuthRequest, res: Response) => {
   res.json(order);
 };
 
-// GET /api/orders/partner-mine — orders placed with the logged-in partner's store
+// GET /api/orders/partner-mine — orders placed with the logged-in partner's
+// store. Supports ?status=<orderStatus|all> and
+// ?dateFilter=today|last7|last30|month|custom (+ startDate/endDate for
+// custom), both applied as backend query filters rather than filtering the
+// already-fetched list client-side.
 export const getPartnerOrders = async (req: AuthRequest, res: Response) => {
   const profile = await PartnerProfile.findOne({ userId: req.user!.id });
   if (!profile) return res.json([]);
-  // Populate the customer's name so the partner order list can show who
-  // placed the order instead of just a raw customerId.
-  const orders = await Order.find({ partnerId: profile._id })
+
+  const filter: any = { partnerId: profile._id };
+
+  const status = parseStatusFilter(req.query.status);
+  if (status) filter.orderStatus = status;
+
+  const dateRange = parseDateFilter(req.query.dateFilter, req.query.startDate, req.query.endDate);
+  if (dateRange) filter.createdAt = dateRange;
+
+  // Populate the customer's name + email so the partner order list can show
+  // who placed the order (email is what's shown; name is kept for any
+  // other UI that still wants it) instead of just a raw customerId.
+  const orders = await Order.find(filter)
     .sort({ createdAt: -1 })
-    .populate("customerId", "name");
+    .populate("customerId", "name email");
   res.json(orders);
 };
 

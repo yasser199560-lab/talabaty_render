@@ -87,12 +87,22 @@ export const getMe = async (req: AuthRequest, res: Response) => {
     status: user.status,
     phone: user.phone,
     town: user.town,
+    avatarUrl: user.avatarUrl,
   });
 };
 
-// PATCH /api/auth/me — Profile page "Save changes"
+// PATCH /api/auth/me — Profile page "Save changes". Shared by every role
+// (customer Profile page, admin Profile page) — avatarUrl is accepted here
+// too rather than a separate endpoint, since it's just another field on
+// the same User document.
 export const updateMe = async (req: AuthRequest, res: Response) => {
-  const { name, phone, town } = req.body;
+  const { name, phone, town, avatarUrl } = req.body;
+
+  // A base64 data URL can legitimately be a few MB; anything drastically
+  // larger than that is either a mistake or abuse, not a real profile photo.
+  if (typeof avatarUrl === "string" && avatarUrl.length > 6_000_000) {
+    return res.status(400).json({ message: "Image is too large" });
+  }
 
   const user = await User.findById(req.user!.id);
   if (!user) return res.status(404).json({ message: "User not found" });
@@ -100,6 +110,7 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
   if (name !== undefined) user.name = name;
   if (phone !== undefined) user.phone = phone;
   if (town !== undefined) user.town = town;
+  if (avatarUrl !== undefined) user.avatarUrl = avatarUrl;
   await user.save();
 
   res.json({
@@ -110,6 +121,7 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
     status: user.status,
     phone: user.phone,
     town: user.town,
+    avatarUrl: user.avatarUrl,
   });
 };
 

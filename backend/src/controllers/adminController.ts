@@ -3,6 +3,7 @@ import User from "../models/User";
 import Order from "../models/Order";
 import PartnerProfile from "../models/PartnerProfile";
 import Product from "../models/Product";
+import { parseStatusFilter, parseDateFilter } from "../utils/orderQueryFilters";
 
 // ========================================================
 // 1. GET /api/admin/stats
@@ -93,24 +94,38 @@ export const listPartnersForAdmin = async (req: Request, res: Response): Promise
 
 // ========================================================
 // 5. GET /api/admin/orders
+// Supports ?status=<orderStatus|all> and
+// ?dateFilter=today|last7|last30|month|custom (+ startDate/endDate for
+// custom) as backend query filters, plus the full item breakdown and the
+// customer's email so the admin order list and its detail modal don't need
+// a second request.
 // ========================================================
 export const listOrdersForAdmin = async (req: Request, res: Response): Promise<void> => {
   try {
-    const ordersFromDb = await Order.find()
-      .populate("customerId")
-      .populate("partnerId")
+    const filter: any = {};
+
+    const status = parseStatusFilter(req.query.status);
+    if (status) filter.orderStatus = status;
+
+    const dateRange = parseDateFilter(req.query.dateFilter, req.query.startDate, req.query.endDate);
+    if (dateRange) filter.createdAt = dateRange;
+
+    const ordersFromDb = await Order.find(filter)
+      .populate("customerId", "name email")
+      .populate("partnerId", "storeName")
       .sort({ createdAt: -1 });
 
     const orders = ordersFromDb.map((order: any) => ({
       _id: order._id,
       customerId: order.customerId?._id || order.customerId,
       partnerId: order.partnerId?._id || order.partnerId,
-      customerName: order.customerId?.name || "Unknown Customer",
+      customerEmail: order.customerId?.email || "Unknown",
       partnerName: order.partnerId?.storeName || "Unknown Store",
+      items: order.items,
       totalAmount: order.totalAmount,
       paymentMethod: order.paymentMethod,
       orderStatus: order.orderStatus,
-      paymentStatus: order.paymentStatus || "Paid",
+      deliveryAddress: order.deliveryAddress,
       createdAt: order.createdAt
     }));
 
