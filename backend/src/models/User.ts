@@ -25,10 +25,22 @@ export interface IUser extends Document {
   // the option at checkout.
   preferredPaymentMethod?: "COD" | "Whish Money";
   whishNumber?: string;
-  // Forgot-password flow: we only ever store the SHA-256 hash of the
-  // reset token, never the raw value, same principle as password storage.
-  resetPasswordToken?: string;
-  resetPasswordExpire?: Date;
+  // Forgot-password flow, in two stages — same principle as the password
+  // field: only hashes are ever stored, never the raw code or token.
+  //   1) forgotPassword emails a one-time 6-digit code and stores its hash
+  //      here (resetOtpHash) with an expiry and an attempt counter, so the
+  //      code can't be brute-forced and can't be reused after it expires.
+  //   2) verifyResetOtp checks that code, then issues a separate short-lived
+  //      session token (resetSessionTokenHash) — only that token, not the
+  //      email/OTP pair, is accepted by resetPassword. This means nobody
+  //      can reset an account's password without actually receiving the
+  //      emailed code first.
+  resetOtpHash?: string;
+  resetOtpExpire?: Date;
+  resetOtpAttempts?: number;
+  resetOtpLastSentAt?: Date;
+  resetSessionTokenHash?: string;
+  resetSessionTokenExpire?: Date;
   createdAt: Date;
   updatedAt: Date;
   comparePassword(candidate: string): Promise<boolean>;
@@ -54,8 +66,12 @@ const userSchema = new Schema<IUser>(
     avatarUrl: { type: String },
     preferredPaymentMethod: { type: String, enum: ["COD", "Whish Money"] },
     whishNumber: { type: String },
-    resetPasswordToken: { type: String, select: false },
-    resetPasswordExpire: { type: Date, select: false },
+    resetOtpHash: { type: String, select: false },
+    resetOtpExpire: { type: Date, select: false },
+    resetOtpAttempts: { type: Number, default: 0, select: false },
+    resetOtpLastSentAt: { type: Date, select: false },
+    resetSessionTokenHash: { type: String, select: false },
+    resetSessionTokenExpire: { type: Date, select: false },
   },
   { timestamps: true }
 );

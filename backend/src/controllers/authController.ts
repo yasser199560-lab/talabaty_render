@@ -3,6 +3,16 @@ import { Request, Response } from "express";
 import User from "../models/User";
 import { generateToken } from "../utils/generateToken";
 import { AuthRequest } from "../types/authRequest";
+import { sendResetOtpEmail } from "../utils/sendEmail";
+
+// Shared helpers for the forgot-password flow below — same hashing
+// approach used for the JWT-adjacent secrets elsewhere in this file.
+const hashValue = (value: string): string => crypto.createHash("sha256").update(value).digest("hex");
+const generateOtp = (): string => crypto.randomInt(100000, 1000000).toString();
+const RESET_OTP_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const RESET_SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const RESET_OTP_COOLDOWN_MS = 60 * 1000; // 1 minute between requests
+const RESET_OTP_MAX_ATTEMPTS = 5;
 
 // POST /api/auth/register
 export const register = async (req: Request, res: Response) => {
@@ -143,68 +153,127 @@ export const changePassword = async (req: AuthRequest, res: Response) => {
   res.json({ message: "Password updated" });
 };
 
-// POST /api/auth/forgot-password — Login page "Forgot password?" flow.
+// POST /api/auth/forgot-password — step 1 of the "Forgot password?" flow.
 // Always responds with the same generic message whether or not the email
 // exists, so this endpoint can't be used to check which emails are
-// registered. In development (no email service configured) the reset
-// link is also returned directly in the response so the flow is testable
-// end-to-end without wiring up a real mail provider.
+// registered. The verification code is only ever sent to the account's
+// own inbox — it is never included in the HTTP response. (The previous
+// version returned a ready-to-use reset link directly in the API response,
+// which meant anyone who knew a victim's email could reset their password
+// without ever touching that inbox. This closes that hole.)
 export const forgotPassword = async (req: Request, res: Response) => {
   const { email } = req.body;
-  const genericMessage = "If an account exists for that email, a reset link will be sent shortly.";
+  const genericMessage = "If an account exists for that email, a verification code has been sent to it.";
 
   if (!email) {
     return res.status(400).json({ message: "Email is required" });
   }
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ email }).select("+resetOtpLastSentAt");
   if (!user) {
     return res.json({ message: genericMessage });
   }
 
-  const rawToken = crypto.randomBytes(32).toString("hex");
-  user.resetPasswordToken = crypto.createHash("sha256").update(rawToken).digest("hex");
-  user.resetPasswordExpire = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+  // Cooldown so the same inbox can't be spammed with repeated codes.
+  if (user.resetOtpLastSentAt && Date.now() - user.resetOtpLastSentAt.getTime() < RESET_OTP_COOLDOWN_MS) {
+    return res.json({ message: genericMessage });
+  }
+
+  const otp = generateOtp();
+  user.resetOtpHash = hashValue(otp);
+  user.resetOtpExpire = new Date(Date.now() + RESET_OTP_TTL_MS);
+  user.resetOtpAttempts = 0;
+  user.resetOtpLastSentAt = new Date();
+  // A fresh code invalidates any previously verified reset session.
+  user.resetSessionTokenHash = undefined;
+  user.resetSessionTokenExpire = undefined;
   await user.save();
 
-  const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
-  const resetUrl = `${clientUrl}/reset-password?token=${rawToken}`;
+  const emailed = await sendResetOtpEmail(email, otp);
+  if (!emailed) {
+    // No SMTP is configured for this environment yet — log the code
+    // server-side only, so the flow stays testable locally without ever
+    // exposing it through the API response itself.
+    console.log(`[dev only] Password reset code for ${email}: ${otp}`);
+  }
 
-  // No email transport is configured in this project, so the link is
-  // logged server-side and echoed back in dev so the flow can be tested.
-  console.log(`Password reset requested for ${email}: ${resetUrl}`);
-
-  res.json({
-    message: genericMessage,
-    ...(process.env.NODE_ENV !== "production" ? { resetUrl } : {}),
-  });
+  res.json({ message: genericMessage });
 };
 
-// POST /api/auth/reset-password — sets a new password from a valid,
-// unexpired reset token issued by forgotPassword.
+// POST /api/auth/verify-reset-otp — step 2. Confirms the person making the
+// request actually has access to the inbox the code was sent to, then
+// issues a short-lived, single-use session token for the final reset step.
+// Incorrect attempts are capped so the 6-digit code can't be brute-forced.
+export const verifyResetOtp = async (req: Request, res: Response) => {
+  const { email, otp } = req.body;
+  const invalidMessage = "That code is invalid or has expired";
+
+  if (!email || !otp) {
+    return res.status(400).json({ message: "Email and code are required" });
+  }
+
+  const user = await User.findOne({ email }).select(
+    "+resetOtpHash +resetOtpExpire +resetOtpAttempts"
+  );
+
+  if (!user || !user.resetOtpHash || !user.resetOtpExpire) {
+    return res.status(400).json({ message: invalidMessage });
+  }
+
+  if (user.resetOtpExpire.getTime() < Date.now()) {
+    return res.status(400).json({ message: invalidMessage });
+  }
+
+  if ((user.resetOtpAttempts ?? 0) >= RESET_OTP_MAX_ATTEMPTS) {
+    return res.status(429).json({ message: "Too many incorrect attempts. Please request a new code." });
+  }
+
+  if (user.resetOtpHash !== hashValue(String(otp))) {
+    user.resetOtpAttempts = (user.resetOtpAttempts ?? 0) + 1;
+    await user.save();
+    return res.status(400).json({ message: invalidMessage });
+  }
+
+  // Correct and single-use: clear the code immediately so it can't be
+  // replayed, then issue the short-lived session token that resetPassword
+  // requires.
+  const sessionToken = crypto.randomBytes(32).toString("hex");
+  user.resetOtpHash = undefined;
+  user.resetOtpExpire = undefined;
+  user.resetOtpAttempts = 0;
+  user.resetSessionTokenHash = hashValue(sessionToken);
+  user.resetSessionTokenExpire = new Date(Date.now() + RESET_SESSION_TTL_MS);
+  await user.save();
+
+  res.json({ message: "Code verified", resetToken: sessionToken });
+};
+
+// POST /api/auth/reset-password — step 3. Requires the one-time session
+// token issued by verifyResetOtp — the raw email/OTP pair is not accepted
+// here, so this step is only reachable after proving control of the inbox.
 export const resetPassword = async (req: Request, res: Response) => {
   const { token, password } = req.body;
 
   if (!token || !password) {
-    return res.status(400).json({ message: "Token and new password are required" });
+    return res.status(400).json({ message: "Reset session and new password are required" });
   }
   if (password.length < 6) {
     return res.status(400).json({ message: "Password must be at least 6 characters" });
   }
 
-  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+  const hashedToken = hashValue(token);
   const user = await User.findOne({
-    resetPasswordToken: hashedToken,
-    resetPasswordExpire: { $gt: new Date() },
-  }).select("+resetPasswordToken +resetPasswordExpire");
+    resetSessionTokenHash: hashedToken,
+    resetSessionTokenExpire: { $gt: new Date() },
+  }).select("+resetSessionTokenHash +resetSessionTokenExpire");
 
   if (!user) {
-    return res.status(400).json({ message: "This reset link is invalid or has expired" });
+    return res.status(400).json({ message: "This reset session is invalid or has expired. Please start over." });
   }
 
   user.password = password;
-  user.resetPasswordToken = undefined;
-  user.resetPasswordExpire = undefined;
+  user.resetSessionTokenHash = undefined;
+  user.resetSessionTokenExpire = undefined;
   await user.save();
 
   res.json({ message: "Password reset successfully. You can now log in." });
