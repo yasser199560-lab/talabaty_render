@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import { connectDB } from "./config/db";
+import  connectDB  from "./config/db";
 import User from "./models/User";
 import PartnerProfile from "./models/PartnerProfile";
 import Product from "./models/Product";
