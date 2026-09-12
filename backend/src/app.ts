@@ -8,6 +8,7 @@ import orderRoutes from "./routes/orderRoutes";
 import adminRoutes from "./routes/adminRoutes";
 import addressRoutes from "./routes/addressRoutes";
 import paymentMethodRoutes from "./routes/paymentMethodRoutes";
+import assistantRoutes from "./routes/assistantRoutes";
 import { notFound, errorHandler } from "./middleware/errorMiddleware";
 
 const app = express();
@@ -37,8 +38,9 @@ app.use(
 // Default express.json() limit is 100kb, which a base64-encoded profile
 // picture blows past immediately (a ~2MB image becomes ~2.7MB as base64).
 // Raised here since the admin profile picture upload is sent as a data URL
-// in the request body rather than a multipart file upload.
-app.use(express.json({ limit: "5mb" }));
+// in the request body rather than a multipart file upload. Also covers the
+// assistant's file-attachment feature (images/PDFs up to ~3MB raw).
+app.use(express.json({ limit: "8mb" }));
 
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 
@@ -50,6 +52,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/addresses", addressRoutes);
 app.use("/api/payment-methods", paymentMethodRoutes);
+app.use("/api/assistant", assistantRoutes);
 
 app.use(notFound);
 app.use(errorHandler);
